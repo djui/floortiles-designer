@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Julie's Floor Designer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="header__brand">
+          <svg class="header__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="2" y="2" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5" />
+            <rect x="13" y="2" width="9" height="5" rx="1" stroke="currentColor" stroke-width="1.5" opacity="0.6" />
+            <rect x="13" y="9" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5" />
+            <rect x="2" y="13" width="5" height="9" rx="1" stroke="currentColor" stroke-width="1.5" opacity="0.6" />
+            <rect x="9" y="13" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+          <div>
+            <h1>Julie's Floor Designer</h1>
+            <p class="header__subtitle">Plan panel layouts for any room</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="main">
+        <aside class="panel panel--controls">
+          <nav class="sidebar-nav" aria-label="Sidebar sections">
+            <a href="#dimensions-section">Dimensions</a>
+            <a href="#layout-section">Layout</a>
+            <a href="#texture-section">Texture</a>
+            <a href="#doors-section">Doors</a>
+            <a href="#profiles-section">Profiles</a>
+            <a href="#summary-section">Summary</a>
+          </nav>
+
+          <form id="layout-form" class="form" novalidate>
+            <section class="form__section" id="dimensions-section" data-accordion-section>
+              <h2>
+                <button
+                  type="button"
+                  class="section-toggle"
+                  id="dimensions-toggle"
+                  aria-expanded="true"
+                  aria-controls="dimensions-panel"
+                >
+                  <span>Dimensions</span>
+                  <span class="section-toggle__meta">Room &amp; tile size</span>
+                </button>
+              </h2>
+              <div class="section-panel section-panel--stacked" id="dimensions-panel" aria-labelledby="dimensions-toggle">
+                <div class="control-group">
+                  <h3>Room dimensions</h3>
+                  <div class="field-row">
+                    <label class="field">
+                      <span class="field__label">Width <small>(cm)</small></span>
+                      <input type="number" id="room-width" min="1" step="0.1" value="400" required />
+                    </label>
+                    <span class="field-row__sep">&times;</span>
+                    <label class="field">
+                      <span class="field__label">Length <small>(cm)</small></span>
+                      <input type="number" id="room-length" min="1" step="0.1" value="300" required />
+                    </label>
+                  </div>
+                </div>
+                <div class="control-group">
+                  <h3>Tile dimensions</h3>
+                  <div class="field-row">
+                    <label class="field">
+                      <span class="field__label">Width <small>(cm)</small></span>
+                      <input type="number" id="panel-width" min="0.1" step="0.1" value="120" required />
+                    </label>
+                    <span class="field-row__sep">&times;</span>
+                    <label class="field">
+                      <span class="field__label">Length <small>(cm)</small></span>
+                      <input type="number" id="panel-length" min="0.1" step="0.1" value="60" required />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="form__section" id="layout-section" data-accordion-section>
+              <h2>
+                <button
+                  type="button"
+                  class="section-toggle"
+                  id="layout-toggle"
+                  aria-expanded="true"
+                  aria-controls="layout-panel"
+                >
+                  <span>Layout options</span>
+                  <span class="section-toggle__meta">Rotation, stagger, cuts</span>
+                </button>
+              </h2>
+              <div class="section-panel section-panel--stacked" id="layout-panel" aria-labelledby="layout-toggle">
+                <div class="control-group">
+                  <h3>Orientation</h3>
+                  <div class="orientation-toggle" role="radiogroup" aria-label="Panel orientation">
+                    <label class="orientation-option">
+                      <input type="radio" name="orientation" value="0" checked />
+                      <span class="orientation-option__box">
+                        <span class="orientation-option__tile orientation-option__tile--portrait"></span>
+                        <span>0° as specified</span>
+                      </span>
+                    </label>
+                    <label class="orientation-option">
+                      <input type="radio" name="orientation" value="90" />
+                      <span class="orientation-option__box">
+                        <span class="orientation-option__tile orientation-option__tile--landscape"></span>
+                        <span>90° rotated</span>
+                      </span>
+                    </label>
+                  </div>
+                  <p class="hint">
+                    Rotating swaps the panel width and length used for the grid.
+                  </p>
+                </div>
+
+                <div class="control-group">
+                  <h3>Rows</h3>
+                  <label class="checkbox-field">
+                    <input type="checkbox" id="alternating" />
+                    <span class="checkbox-field__label">Alternating rows</span>
+                  </label>
+                  <p class="hint" id="alternating-hint">
+                    Even rows start from the left; odd rows from the right.
+                  </p>
+                </div>
+
+                <div class="control-group">
+                  <h3>Edge offsets</h3>
+                  <p class="hint hint--block">
+                    Set the size of the <strong>first cut panel</strong> at each starting edge.
+                  </p>
+                  <div class="field-row">
+                    <label class="field">
+                      <span class="field__label">Left cut <small>(cm)</small></span>
+                      <input type="number" id="offset-width" min="0" step="0.1" value="0" />
+                    </label>
+                    <label class="field">
+                      <span class="field__label">Top cut <small>(cm)</small></span>
+                      <input type="number" id="offset-length" min="0" step="0.1" value="0" />
+                    </label>
+                  </div>
+                  <p class="hint">
+                    0 starts with a full panel at the left / top edge.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section class="form__section" id="texture-section" data-accordion-section>
+              <h2>
+                <button
+                  type="button"
+                  class="section-toggle"
+                  id="texture-toggle"
+                  aria-expanded="false"
+                  aria-controls="texture-panel"
+                >
+                  <span>Tile texture</span>
+                  <span class="section-toggle__meta">Optional image fill</span>
+                </button>
+              </h2>
+              <div class="section-panel" id="texture-panel" aria-labelledby="texture-toggle" hidden>
+                <div
+                  id="tile-dropzone"
+                  class="tile-dropzone"
+                  tabindex="0"
+                  role="button"
+                  aria-label="Drop a tile image here or click to browse"
+                >
+                  <input type="file" id="tile-file" class="tile-dropzone__input" accept="image/*" />
+                  <p class="tile-dropzone__prompt">Drop an image here or click to browse</p>
+                  <p class="tile-dropzone__hint">Used as the panel fill in the layout preview</p>
+                </div>
+                <div id="tile-preview" class="tile-preview" hidden>
+                  <img id="tile-preview-img" class="tile-preview__img" alt="" />
+                  <div class="tile-preview__meta">
+                    <span id="tile-preview-name" class="tile-preview__name"></span>
+                    <button type="button" id="tile-clear" class="btn btn--ghost btn--sm">Remove</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="form__section" id="doors-section" data-accordion-section>
+              <h2>
+                <button
+                  type="button"
+                  class="section-toggle"
+                  id="doors-toggle"
+                  aria-expanded="false"
+                  aria-controls="doors-panel"
+                >
+                  <span>Doors</span>
+                  <span class="section-toggle__meta">Wall overlays</span>
+                </button>
+              </h2>
+              <div class="section-panel" id="doors-panel" aria-labelledby="doors-toggle" hidden>
+                <p class="hint hint--block">
+                  Place door symbols on room walls. They are overlays only and do not
+                  affect the tile layout. Click a wall in the preview to add a door there.
+                </p>
+                <button type="button" id="add-door" class="btn btn--primary">Add door</button>
+                <div id="doors-list" class="doors-list" aria-live="polite"></div>
+              </div>
+            </section>
+
+            <section class="form__section" id="profiles-section" data-accordion-section>
+              <h2>
+                <button
+                  type="button"
+                  class="section-toggle"
+                  id="profiles-toggle"
+                  aria-expanded="false"
+                  aria-controls="profiles-panel"
+                >
+                  <span>Saved profiles</span>
+                  <span class="section-toggle__meta">Save, import, export</span>
+                </button>
+              </h2>
+              <div class="section-panel section-panel--stacked" id="profiles-panel" aria-labelledby="profiles-toggle" hidden>
+                <div class="control-group">
+                  <h3>Save / load</h3>
+                  <p class="hint hint--block">
+                    Save the current room, panel, and layout settings as a named template.
+                  </p>
+                  <label class="field">
+                    <span class="field__label">Profile name</span>
+                    <input type="text" id="profile-name" placeholder="e.g. Living room" maxlength="80" />
+                  </label>
+                  <button type="button" id="save-profile" class="btn btn--primary">Save profile</button>
+                  <div class="profile-actions">
+                    <label class="field profile-actions__select">
+                      <span class="field__label">Load profile</span>
+                      <select id="profile-select">
+                        <option value="">— Choose a profile —</option>
+                      </select>
+                    </label>
+                    <button type="button" id="delete-profile" class="btn btn--ghost btn--sm" disabled>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div class="profile-transfer control-group">
+                  <h3>Import / export</h3>
+                  <div class="profile-transfer__actions">
+                    <button type="button" id="export-profile" class="btn btn--ghost btn--sm" disabled>
+                      Export selected
+                    </button>
+                    <button type="button" id="export-all-profiles" class="btn btn--ghost btn--sm">
+                      Export all
+                    </button>
+                  </div>
+                  <p class="hint">Download selected or all profiles as JSON for backup or sharing.</p>
+                  <div
+                    id="import-dropzone"
+                    class="import-dropzone"
+                    tabindex="0"
+                    role="button"
+                    aria-label="Drop a profile JSON file here or click to browse"
+                  >
+                    <input
+                      type="file"
+                      id="import-file"
+                      class="import-dropzone__input"
+                      accept="application/json,.json"
+                    />
+                    <p class="import-dropzone__prompt">Drop a profile JSON file here or click to browse</p>
+                    <p class="import-dropzone__hint">Imports merge into your saved profiles</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </form>
+
+          <p id="storage-notice" class="storage-notice" hidden role="status"></p>
+          <section class="form__section" id="summary-section" data-accordion-section>
+            <h2>
+              <button
+                type="button"
+                class="section-toggle"
+                id="summary-toggle"
+                aria-expanded="true"
+                aria-controls="summary-panel"
+              >
+                <span>Summary</span>
+                <span class="section-toggle__meta">Statistics &amp; cuts</span>
+              </button>
+            </h2>
+            <div class="section-panel stats" id="summary-panel" aria-labelledby="summary-toggle">
+              <div id="stats" aria-live="polite"></div>
+            </div>
+          </section>
+        </aside>
+
+        <div class="panel panel--canvas">
+          <div class="canvas-header">
+            <h2 id="preview-title">Unsaved layout</h2>
+            <div class="canvas-actions">
+              <div class="legend">
+                <span class="legend__item"><span class="legend__swatch legend__swatch--full"></span> Full panel</span>
+                <span class="legend__item"><span class="legend__swatch legend__swatch--cut"></span> Cut panel</span>
+                <span class="legend__item"><span class="legend__swatch legend__swatch--door"></span> Door</span>
+              </div>
+              <button type="button" id="export-image" class="btn btn--ghost btn--sm">
+                Export image
+              </button>
+            </div>
+          </div>
+          <div class="canvas-wrap" id="canvas-wrap">
+            <svg id="layout-svg" class="layout-svg" role="img" aria-label="Tile layout diagram"></svg>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
