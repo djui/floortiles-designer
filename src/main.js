@@ -40,6 +40,7 @@ const tilePreview = document.getElementById('tile-preview');
 const tilePreviewImg = document.getElementById('tile-preview-img');
 const tilePreviewName = document.getElementById('tile-preview-name');
 const tileClearBtn = document.getElementById('tile-clear');
+const materialSelect = document.getElementById('material-select');
 const storageNotice = document.getElementById('storage-notice');
 const profileNameInput = document.getElementById('profile-name');
 const saveProfileBtn = document.getElementById('save-profile');
@@ -62,6 +63,34 @@ const EXPORT_IMAGE_SCALE = 2;
 const EXPORT_LAYOUT_FALLBACK = 'julies-floor-layout';
 const EXPORT_UNSAVED_FALLBACK = 'unsaved-layout';
 const EXPORT_PROFILES_COLLECTION = 'julies-floor-profiles';
+const CUSTOM_MATERIAL_ID = '';
+
+function materialAssetUrl(filename) {
+  return `${import.meta.env.BASE_URL}materials/${filename}`;
+}
+
+const MATERIAL_PRESETS = [
+  {
+    id: 'fluffy-panel',
+    label: 'Fluffy (Panel)',
+    panelWidth: 122,
+    panelLength: 18,
+    texture: {
+      name: 'fluffy-panel.png',
+      dataUrl: materialAssetUrl('fluffy-panel.png'),
+    },
+  },
+  {
+    id: 'floorify-tile',
+    label: 'Floorify (Tile)',
+    panelWidth: 30.5,
+    panelLength: 61,
+    texture: {
+      name: 'floorify-tile.png',
+      dataUrl: materialAssetUrl('floorify-tile.png'),
+    },
+  },
+];
 
 let tileImage = null;
 let doors = [];
@@ -73,6 +102,7 @@ let lastRenderContext = null;
 let lastLayout = null;
 let activeProfile = null;
 let activeProfileSnapshot = null;
+let selectedMaterialId = CUSTOM_MATERIAL_ID;
 
 function setAccordionSection(button, expanded) {
   const panelId = button.getAttribute('aria-controls');
@@ -124,8 +154,52 @@ function readInputs() {
   };
 }
 
+function getMaterialPreset(id) {
+  return MATERIAL_PRESETS.find((preset) => preset.id === id) ?? null;
+}
+
+function cloneTileImage(image) {
+  if (!image?.dataUrl) return null;
+  return {
+    dataUrl: image.dataUrl,
+    name: image.name || '',
+  };
+}
+
+function populateMaterialSelect() {
+  if (!materialSelect) return;
+
+  for (const material of MATERIAL_PRESETS) {
+    const option = document.createElement('option');
+    option.value = material.id;
+    option.textContent = material.label;
+    materialSelect.appendChild(option);
+  }
+}
+
+function syncMaterialSelect() {
+  if (!materialSelect) return;
+  materialSelect.value = getMaterialPreset(selectedMaterialId) ? selectedMaterialId : CUSTOM_MATERIAL_ID;
+}
+
+function markMaterialCustom() {
+  if (!selectedMaterialId) return;
+  selectedMaterialId = CUSTOM_MATERIAL_ID;
+  syncMaterialSelect();
+}
+
+function isMaterialDimensionTarget(target) {
+  return target?.id === 'panel-width' || target?.id === 'panel-length';
+}
+
 function getSessionState() {
-  return { ...readInputs(), tileImage, doors, activeProfile };
+  return {
+    ...readInputs(),
+    tileImage,
+    doors,
+    activeProfile,
+    selectedMaterial: selectedMaterialId || null,
+  };
 }
 
 function finiteNumber(value) {
@@ -170,6 +244,7 @@ function createLayoutSnapshot(state) {
     offsetWidth: finiteNumber(Number(state.offsetWidth) || 0),
     offsetLength: finiteNumber(Number(state.offsetLength) || 0),
     alternating: Boolean(state.alternating),
+    selectedMaterial: getMaterialPreset(state.selectedMaterial)?.id ?? null,
     tileImage: normalizeTileImageSnapshot(state.tileImage),
     doors: normalizedDoors.map((door) => normalizeDoorSnapshot(door, roomWidth, roomLength)),
   });
@@ -210,12 +285,39 @@ function applySessionState(state) {
   const orientationInput = form.querySelector(`input[name="orientation"][value="${orientation}"]`);
   if (orientationInput) orientationInput.checked = true;
 
-  tileImage = state.tileImage?.dataUrl ? state.tileImage : null;
+  selectedMaterialId = getMaterialPreset(state.selectedMaterial)?.id ?? CUSTOM_MATERIAL_ID;
+  syncMaterialSelect();
+
+  const selectedMaterial = getMaterialPreset(selectedMaterialId);
+  tileImage = state.tileImage?.dataUrl
+    ? cloneTileImage(state.tileImage)
+    : cloneTileImage(selectedMaterial?.texture);
   updateTilePreview();
 
   const roomWidth = parseFloat(document.getElementById('room-width').value) || 400;
   const roomLength = parseFloat(document.getElementById('room-length').value) || 300;
   doors = normalizeDoors(state.doors, roomWidth, roomLength);
+}
+
+function applyMaterialPreset(materialId) {
+  const material = getMaterialPreset(materialId);
+  if (!material) {
+    selectedMaterialId = CUSTOM_MATERIAL_ID;
+    syncMaterialSelect();
+    update();
+    schedulePersist();
+    return;
+  }
+
+  selectedMaterialId = material.id;
+  document.getElementById('panel-width').value = material.panelWidth;
+  document.getElementById('panel-length').value = material.panelLength;
+  tileImage = cloneTileImage(material.texture);
+  tileFileInput.value = '';
+  syncMaterialSelect();
+  updateTilePreview();
+  update();
+  schedulePersist();
 }
 
 function validateInputs(inputs) {
@@ -268,6 +370,7 @@ function updateTilePreview() {
 async function setTileImageFromFile(file) {
   try {
     tileImage = await processImageFile(file);
+    markMaterialCustom();
     updateTilePreview();
     update();
     schedulePersist();
@@ -279,6 +382,7 @@ async function setTileImageFromFile(file) {
 function clearTileImage() {
   tileImage = null;
   tileFileInput.value = '';
+  markMaterialCustom();
   updateTilePreview();
   update();
   schedulePersist();
@@ -1038,6 +1142,7 @@ function handleSaveProfile() {
     ...inputs,
     tileImage,
     doors,
+    selectedMaterial: selectedMaterialId || null,
   };
 
   const result = saveProfile(profile);
@@ -1134,6 +1239,7 @@ tileFileInput.addEventListener('change', () => {
 });
 
 tileClearBtn.addEventListener('click', clearTileImage);
+materialSelect.addEventListener('change', () => applyMaterialPreset(materialSelect.value));
 
 saveProfileBtn.addEventListener('click', handleSaveProfile);
 exportProfileBtn.addEventListener('click', handleExportProfile);
@@ -1348,11 +1454,19 @@ svg.addEventListener('click', (event) => {
   }
 });
 
-form.addEventListener('input', update);
-form.addEventListener('change', update);
+form.addEventListener('input', (event) => {
+  if (isMaterialDimensionTarget(event.target)) markMaterialCustom();
+  update();
+});
+form.addEventListener('change', (event) => {
+  if (event.target === materialSelect) return;
+  if (isMaterialDimensionTarget(event.target)) markMaterialCustom();
+  update();
+});
 window.addEventListener('resize', update);
 
 initSidebarAccordions();
+populateMaterialSelect();
 const restoredSession = loadSession();
 applySessionState(restoredSession);
 restoreActiveProfileFromSession(restoredSession);

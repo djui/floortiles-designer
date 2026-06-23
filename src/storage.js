@@ -4,7 +4,7 @@ export const STORAGE_KEYS = {
 };
 
 export const EXPORT_FORMAT = 'julies-floor-designer-profiles';
-export const EXPORT_VERSION = 1;
+export const EXPORT_VERSION = 2;
 
 const MAX_IMAGE_DIM = 800;
 const JPEG_QUALITY = 0.85;
@@ -241,6 +241,7 @@ function serializeState(state, includeImage) {
     offsetWidth: state.offsetWidth,
     offsetLength: state.offsetLength,
     alternating: state.alternating,
+    selectedMaterial: normalizeSelectedMaterial(state.selectedMaterial),
     doors: Array.isArray(state.doors) ? state.doors : [],
     tileImage: includeImage ? state.tileImage ?? null : null,
   };
@@ -310,9 +311,14 @@ function validateImportedProfile(raw, index) {
     offsetWidth,
     offsetLength,
     alternating: Boolean(raw.alternating),
+    selectedMaterial: normalizeSelectedMaterial(raw.selectedMaterial),
     doors: Array.isArray(raw.doors) ? raw.doors : [],
     tileImage: normalizeImportedTileImage(raw.tileImage),
   };
+}
+
+function normalizeSelectedMaterial(selectedMaterial) {
+  return typeof selectedMaterial === 'string' && selectedMaterial ? selectedMaterial : null;
 }
 
 function normalizeImportedTileImage(tileImage) {
