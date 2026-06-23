@@ -320,18 +320,64 @@
           <div class="canvas-header">
             <h2 id="preview-title">Unsaved layout</h2>
             <div class="canvas-actions">
-              <div class="legend">
-                <span class="legend__item"><span class="legend__swatch legend__swatch--full"></span> Full panel</span>
-                <span class="legend__item"><span class="legend__swatch legend__swatch--cut"></span> Cut panel</span>
-                <span class="legend__item"><span class="legend__swatch legend__swatch--door"></span> Door</span>
-              </div>
-              <button type="button" id="export-image" class="btn btn--ghost btn--sm">
-                Export image
+              <button
+                type="button"
+                id="export-image"
+                class="btn btn--ghost btn--sm export-image-button"
+                aria-label="Export image"
+                title="Export image"
+              >
+                <svg class="export-image-button__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v10.5" />
+                  <path d="m8.25 9.75 3.75 3.75 3.75-3.75" />
+                  <path d="M5 14.5v3.75A2.75 2.75 0 0 0 7.75 21h8.5A2.75 2.75 0 0 0 19 18.25V14.5" />
+                </svg>
               </button>
             </div>
           </div>
           <div class="canvas-wrap" id="canvas-wrap">
+            <div class="view-controls view-controls--overlay" role="group" aria-label="3D view presets for design grid">
+              <span class="view-controls__label">View</span>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm view-controls__button"
+                data-view-preset="top"
+                aria-label="Set 3D view to top-down"
+                aria-pressed="false"
+              >
+                <svg class="view-controls__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect class="view-controls__icon-floor" x="5" y="5" width="14" height="14" rx="2" />
+                  <path class="view-controls__icon-grid" d="M12 5v14M5 12h14" />
+                  <path class="view-controls__icon-arrow" d="M12 2.75v4.5m-2-2 2 2 2-2" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm view-controls__button"
+                data-view-preset="angle45"
+                aria-label="Set 3D view to 45 degree angle"
+                aria-pressed="false"
+              >
+                <svg class="view-controls__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path class="view-controls__icon-wall" d="M6 8.5 12 5l6 3.5v5L12 17 6 13.5z" />
+                  <path class="view-controls__icon-floor" d="M4 13.5 12 9l8 4.5-8 4.5z" />
+                  <path class="view-controls__icon-grid" d="M8 11.25 16 15.75M16 11.25 8 15.75" />
+                  <path class="view-controls__icon-arrow" d="m16.5 4.5 3 1.25-1.25 3" />
+                </svg>
+              </button>
+            </div>
             <svg id="layout-svg" class="layout-svg" role="img" aria-label="3D room tile layout diagram"></svg>
+            <div class="legend legend--overlay" role="list" aria-label="Layout legend">
+              <span class="legend__item" role="listitem">
+                <span class="legend__swatch legend__swatch--full"></span> Full panel
+              </span>
+              <span class="legend__item" role="listitem">
+                <span class="legend__swatch legend__swatch--cut"></span> Cut panel
+              </span>
+              <span class="legend__item" role="listitem">
+                <span class="legend__swatch legend__swatch--door"></span> Door
+              </span>
+            </div>
           </div>
         </div>
       </main>

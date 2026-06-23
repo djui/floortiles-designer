@@ -52,6 +52,7 @@ const alternatingHint = document.getElementById('alternating-hint');
 const addDoorBtn = document.getElementById('add-door');
 const doorsListEl = document.getElementById('doors-list');
 const exportImageBtn = document.getElementById('export-image');
+const viewPresetBtns = document.querySelectorAll('[data-view-preset]');
 const previewTitle = document.getElementById('preview-title');
 
 const PADDING = 48;
@@ -59,6 +60,7 @@ const MIN_ZOOM = 0.5;
 const PERSIST_DELAY = 300;
 const EXPORT_IMAGE_SCALE = 2;
 const ROOM_WALL_HEIGHT_CM = 200;
+const ROOM_DOOR_HEIGHT_CM = 185;
 const ROOM_BASE_PITCH_DEG = 58;
 const ROOM_BASE_YAW_DEG = -28;
 const ROOM_ROTATION_START_X = 0;
@@ -69,6 +71,10 @@ const ROOM_ROTATION_MIN_Y = -42;
 const ROOM_ROTATION_MAX_Y = 42;
 const ROOM_ROTATION_SENSITIVITY = 0.25;
 const ROOM_ROTATION_CLICK_THRESHOLD = 4;
+const ROOM_VIEW_PRESETS = {
+  top: { x: 90 - ROOM_BASE_PITCH_DEG, y: 0 - ROOM_BASE_YAW_DEG },
+  angle45: { x: 45 - ROOM_BASE_PITCH_DEG, y: -45 - ROOM_BASE_YAW_DEG },
+};
 const EXPORT_LAYOUT_FALLBACK = 'julies-floor-layout';
 const EXPORT_UNSAVED_FALLBACK = 'unsaved-layout';
 const EXPORT_PROFILES_COLLECTION = 'julies-floor-profiles';
@@ -691,6 +697,29 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function rotationsMatch(a, b) {
+  return Math.abs(a.x - b.x) < 0.001 && Math.abs(a.y - b.y) < 0.001;
+}
+
+function syncViewPresetButtons() {
+  viewPresetBtns.forEach((button) => {
+    const preset = ROOM_VIEW_PRESETS[button.dataset.viewPreset];
+    button.setAttribute('aria-pressed', String(Boolean(preset && rotationsMatch(roomRotation, preset))));
+  });
+}
+
+function setRoomViewPreset(presetId) {
+  const preset = ROOM_VIEW_PRESETS[presetId];
+  if (!preset) return;
+
+  roomRotation = {
+    x: clamp(preset.x, ROOM_ROTATION_MIN_X, ROOM_ROTATION_MAX_X),
+    y: clamp(preset.y, ROOM_ROTATION_MIN_Y, ROOM_ROTATION_MAX_Y),
+  };
+  selectedDoorId = null;
+  renderPreview();
+}
+
 function pointsAttr(points) {
   return points.map((p) => `${p.x},${p.y}`).join(' ');
 }
@@ -962,7 +991,7 @@ function projectedDoorArcPoints(projection, hinge, free, leaf, steps = 12) {
 
 function renderDoorSvg3d(door, roomWidth, roomLength, projection, { selected = false } = {}) {
   const geom = doorGeometry(door, roomWidth, roomLength);
-  const h = ROOM_WALL_HEIGHT_CM;
+  const h = ROOM_DOOR_HEIGHT_CM;
   const hinge = projection.project(floorPointToWorld(geom.hinge.x, geom.hinge.y));
   const free = projection.project(floorPointToWorld(geom.free.x, geom.free.y));
   const leaf = projection.project(floorPointToWorld(geom.leaf.x, geom.leaf.y));
@@ -1020,6 +1049,7 @@ function renderDoorSvg3d(door, roomWidth, roomLength, projection, { selected = f
 
 function renderSvg(layout) {
   const { roomWidth, roomLength, panels } = layout;
+  syncViewPresetButtons();
   const wrapRect = canvasWrap.getBoundingClientRect();
   const availW = Math.max(wrapRect.width - 2, 200);
   const availH = Math.max(wrapRect.height - 2, 200);
@@ -1629,6 +1659,9 @@ saveProfileBtn.addEventListener('click', handleSaveProfile);
 exportProfileBtn.addEventListener('click', handleExportProfile);
 exportAllProfilesBtn.addEventListener('click', handleExportAllProfiles);
 exportImageBtn.addEventListener('click', handleExportImage);
+viewPresetBtns.forEach((button) => {
+  button.addEventListener('click', () => setRoomViewPreset(button.dataset.viewPreset));
+});
 profileSelect.addEventListener('change', () => {
   deleteProfileBtn.disabled = !profileSelect.value;
   exportProfileBtn.disabled = !profileSelect.value;
