@@ -739,6 +739,51 @@ select:focus {
   display: block;
   max-width: 100%;
   height: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.layout-svg--rotating {
+  cursor: grabbing;
+}
+
+.room-floor-shadow {
+  fill: rgb(28 25 23 / 10%);
+}
+
+.room-wall {
+  stroke: #d6d3d1;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.room-wall--back {
+  fill: #f5f3f0;
+}
+
+.room-wall--left {
+  fill: #ebe7e1;
+}
+
+.room-wall--right {
+  fill: #e3ddd4;
+}
+
+.room-wall--front {
+  fill: rgb(255 253 250 / 0.38);
+}
+
+.room-wall-lines,
+.room-corner-lines {
+  fill: none;
+  stroke: rgb(120 113 108 / 48%);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.room-floor-base {
+  fill: #fffdfa;
+  stroke: none;
 }
 
 .room-outline {
@@ -923,6 +968,13 @@ select:focus {
   stroke-width: 2.5;
 }
 
+.door-wall-opening {
+  fill: rgb(255 255 255 / 0.55);
+  stroke: #7c3aed;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .door-opening,
 .door-leaf,
 .door-arc {
@@ -934,10 +986,6 @@ select:focus {
 
 .door-opening {
   stroke-width: 2.5;
-}
-
-.layout-svg {
-  cursor: default;
 }
 
 @media (max-width: 860px) {

@@ -2,16 +2,14 @@ import { computeLayout, formatCm } from './layout.js';
 import {
   createDoor,
   DEFAULT_DOOR_WIDTH,
+  doorGeometry,
   getDoorWidth,
   getWallLength,
   MAX_DOOR_WIDTH,
   MIN_DOOR_WIDTH,
   normalizeDoors,
-  pickWallFromPoint,
   pickWallFromRoomPoint,
   positionAfterResize,
-  renderDoorSvg,
-  renderWallHitZones,
   widthFromHandleDrag,
   WALL_LABELS,
   WALLS,
@@ -60,6 +58,17 @@ const PADDING = 48;
 const MIN_ZOOM = 0.5;
 const PERSIST_DELAY = 300;
 const EXPORT_IMAGE_SCALE = 2;
+const ROOM_WALL_HEIGHT_CM = 200;
+const ROOM_BASE_PITCH_DEG = 58;
+const ROOM_BASE_YAW_DEG = -28;
+const ROOM_ROTATION_START_X = 0;
+const ROOM_ROTATION_START_Y = 0;
+const ROOM_ROTATION_MIN_X = -32;
+const ROOM_ROTATION_MAX_X = 32;
+const ROOM_ROTATION_MIN_Y = -42;
+const ROOM_ROTATION_MAX_Y = 42;
+const ROOM_ROTATION_SENSITIVITY = 0.25;
+const ROOM_ROTATION_CLICK_THRESHOLD = 4;
 const EXPORT_LAYOUT_FALLBACK = 'julies-floor-layout';
 const EXPORT_UNSAVED_FALLBACK = 'unsaved-layout';
 const EXPORT_PROFILES_COLLECTION = 'julies-floor-profiles';
@@ -103,6 +112,8 @@ let lastLayout = null;
 let activeProfile = null;
 let activeProfileSnapshot = null;
 let selectedMaterialId = CUSTOM_MATERIAL_ID;
+let roomRotation = { x: ROOM_ROTATION_START_X, y: ROOM_ROTATION_START_Y };
+let suppressNextSvgClick = false;
 
 function setAccordionSection(button, expanded) {
   const panelId = button.getAttribute('aria-controls');
@@ -437,11 +448,17 @@ function svgPointFromEvent(event) {
 }
 
 function roomPointFromSvg(svgX, svgY) {
-  const { tx, ty, scale } = lastRenderContext;
-  return {
-    x: (svgX - tx(0)) / scale,
-    y: (svgY - ty(0)) / scale,
-  };
+  return lastRenderContext.projection.roomPointFromSvg(svgX, svgY);
+}
+
+function pickWallFromHitZone(event, hitZone) {
+  const { roomWidth, roomLength } = lastRenderContext;
+  const wall = hitZone.dataset.wall;
+  const pt = svgPointFromEvent(event);
+  const room = roomPointFromSvg(pt.x, pt.y);
+  return pickWallFromRoomPoint(room.x, room.y, roomWidth, roomLength, DEFAULT_DOOR_WIDTH, {
+    preferWall: wall,
+  });
 }
 
 function syncDoorFormFields(id) {
@@ -670,11 +687,335 @@ function buildPatternDef(layout, scale) {
   `;
 }
 
-function outwardDoorSwingMargin() {
-  return doors.reduce(
-    (max, d) => (d.facing === 'outward' ? Math.max(max, getDoorWidth(d)) : max),
-    0
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function pointsAttr(points) {
+  return points.map((p) => `${p.x},${p.y}`).join(' ');
+}
+
+function degreesToRadians(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+function worldPoint(x, y, z) {
+  return { x, y, z };
+}
+
+function floorPointToWorld(x, z) {
+  return worldPoint(x, 0, z);
+}
+
+function rotateWorldPoint(point, roomWidth, roomLength) {
+  const pitch = degreesToRadians(ROOM_BASE_PITCH_DEG + roomRotation.x);
+  const yaw = degreesToRadians(ROOM_BASE_YAW_DEG + roomRotation.y);
+  const centered = {
+    x: point.x - roomWidth / 2,
+    y: point.y - ROOM_WALL_HEIGHT_CM / 2,
+    z: point.z - roomLength / 2,
+  };
+
+  const cosY = Math.cos(yaw);
+  const sinY = Math.sin(yaw);
+  const yawed = {
+    x: centered.x * cosY + centered.z * sinY,
+    y: centered.y,
+    z: -centered.x * sinY + centered.z * cosY,
+  };
+
+  const cosX = Math.cos(pitch);
+  const sinX = Math.sin(pitch);
+  return {
+    x: yawed.x,
+    y: yawed.y * cosX - yawed.z * sinX,
+    z: yawed.y * sinX + yawed.z * cosX,
+  };
+}
+
+function projectRaw(point, roomWidth, roomLength) {
+  const rotated = rotateWorldPoint(point, roomWidth, roomLength);
+  return { x: rotated.x, y: -rotated.y, depth: rotated.z };
+}
+
+function roomShellWorldPoints(roomWidth, roomLength) {
+  const h = ROOM_WALL_HEIGHT_CM;
+  return [
+    worldPoint(0, 0, 0),
+    worldPoint(roomWidth, 0, 0),
+    worldPoint(roomWidth, 0, roomLength),
+    worldPoint(0, 0, roomLength),
+    worldPoint(0, h, 0),
+    worldPoint(roomWidth, h, 0),
+    worldPoint(roomWidth, h, roomLength),
+    worldPoint(0, h, roomLength),
+  ];
+}
+
+function doorWorldPoints(roomWidth, roomLength) {
+  return doors.flatMap((door) => {
+    const geom = doorGeometry(door, roomWidth, roomLength);
+    return [geom.hinge, geom.free, geom.leaf].map((p) => floorPointToWorld(p.x, p.y));
+  });
+}
+
+function createRoomProjection(roomWidth, roomLength, availW, availH) {
+  const boundsPoints = [...roomShellWorldPoints(roomWidth, roomLength), ...doorWorldPoints(roomWidth, roomLength)]
+    .map((point) => projectRaw(point, roomWidth, roomLength));
+  const minX = Math.min(...boundsPoints.map((p) => p.x));
+  const maxX = Math.max(...boundsPoints.map((p) => p.x));
+  const minY = Math.min(...boundsPoints.map((p) => p.y));
+  const maxY = Math.max(...boundsPoints.map((p) => p.y));
+  const rawW = Math.max(maxX - minX, 1);
+  const rawH = Math.max(maxY - minY, 1);
+  const scale = Math.max(
+    MIN_ZOOM,
+    Math.min((availW - PADDING * 2) / rawW, (availH - PADDING * 2) / rawH)
   );
+  const svgW = rawW * scale + PADDING * 2;
+  const svgH = rawH * scale + PADDING * 2;
+  const offsetX = PADDING - minX * scale;
+  const offsetY = PADDING - minY * scale;
+
+  const project = (point) => {
+    const raw = projectRaw(point, roomWidth, roomLength);
+    return {
+      x: raw.x * scale + offsetX,
+      y: raw.y * scale + offsetY,
+      depth: raw.depth,
+    };
+  };
+
+  const floorOrigin = project(floorPointToWorld(0, 0));
+  const floorX = project(floorPointToWorld(1, 0));
+  const floorZ = project(floorPointToWorld(0, 1));
+  const bx = { x: floorX.x - floorOrigin.x, y: floorX.y - floorOrigin.y };
+  const bz = { x: floorZ.x - floorOrigin.x, y: floorZ.y - floorOrigin.y };
+  const det = bx.x * bz.y - bx.y * bz.x;
+
+  const roomPointFromSvg = (svgX, svgY) => {
+    if (Math.abs(det) < 0.000001) return { x: 0, y: 0 };
+    const px = svgX - floorOrigin.x;
+    const py = svgY - floorOrigin.y;
+    return {
+      x: (px * bz.y - py * bz.x) / det,
+      y: (bx.x * py - bx.y * px) / det,
+    };
+  };
+
+  return {
+    project,
+    roomPointFromSvg,
+    scale,
+    svgW,
+    svgH,
+  };
+}
+
+function projectWorldPolygon(projection, points) {
+  return pointsAttr(points.map((point) => projection.project(point)));
+}
+
+function projectFloorPolygon(projection, points) {
+  return projectWorldPolygon(
+    projection,
+    points.map((point) => floorPointToWorld(point.x, point.y))
+  );
+}
+
+function pathFromProjectedPoints(points, close = false) {
+  if (!points.length) return '';
+  const commands = [`M ${points[0].x} ${points[0].y}`];
+  for (const point of points.slice(1)) {
+    commands.push(`L ${point.x} ${point.y}`);
+  }
+  if (close) commands.push('Z');
+  return commands.join(' ');
+}
+
+function renderRoomShell(roomWidth, roomLength, projection) {
+  const h = ROOM_WALL_HEIGHT_CM;
+  const floor = [
+    worldPoint(0, 0, 0),
+    worldPoint(roomWidth, 0, 0),
+    worldPoint(roomWidth, 0, roomLength),
+    worldPoint(0, 0, roomLength),
+  ];
+  const backWall = [
+    worldPoint(0, 0, 0),
+    worldPoint(roomWidth, 0, 0),
+    worldPoint(roomWidth, h, 0),
+    worldPoint(0, h, 0),
+  ];
+  const rightWall = [
+    worldPoint(roomWidth, 0, 0),
+    worldPoint(roomWidth, 0, roomLength),
+    worldPoint(roomWidth, h, roomLength),
+    worldPoint(roomWidth, h, 0),
+  ];
+  const frontWall = [
+    worldPoint(roomWidth, 0, roomLength),
+    worldPoint(0, 0, roomLength),
+    worldPoint(0, h, roomLength),
+    worldPoint(roomWidth, h, roomLength),
+  ];
+  const leftWall = [
+    worldPoint(0, 0, roomLength),
+    worldPoint(0, 0, 0),
+    worldPoint(0, h, 0),
+    worldPoint(0, h, roomLength),
+  ];
+  const shadow = floor.map((point) => {
+    const projected = projection.project(worldPoint(point.x, -8, point.z));
+    return { x: projected.x + 14, y: projected.y + 14 };
+  });
+  const wallEdges = [
+    [worldPoint(0, 0, 0), worldPoint(0, h, 0)],
+    [worldPoint(roomWidth, 0, 0), worldPoint(roomWidth, h, 0)],
+    [worldPoint(roomWidth, 0, roomLength), worldPoint(roomWidth, h, roomLength)],
+    [worldPoint(0, 0, roomLength), worldPoint(0, h, roomLength)],
+    [worldPoint(0, h, 0), worldPoint(roomWidth, h, 0)],
+    [worldPoint(roomWidth, h, 0), worldPoint(roomWidth, h, roomLength)],
+    [worldPoint(roomWidth, h, roomLength), worldPoint(0, h, roomLength)],
+    [worldPoint(0, h, roomLength), worldPoint(0, h, 0)],
+  ]
+    .map(([a, b]) => {
+      const pa = projection.project(a);
+      const pb = projection.project(b);
+      return `M ${pa.x} ${pa.y} L ${pb.x} ${pb.y}`;
+    })
+    .join(' ');
+
+  return `
+    <polygon points="${pointsAttr(shadow)}" class="room-floor-shadow" />
+    <polygon points="${projectWorldPolygon(projection, backWall)}" class="room-wall room-wall--back" />
+    <polygon points="${projectWorldPolygon(projection, leftWall)}" class="room-wall room-wall--left" />
+    <polygon points="${projectWorldPolygon(projection, rightWall)}" class="room-wall room-wall--right" />
+    <polygon points="${projectWorldPolygon(projection, frontWall)}" class="room-wall room-wall--front" />
+    <path d="${wallEdges}" class="room-wall-lines" />
+    <polygon points="${projectWorldPolygon(projection, floor)}" class="room-floor-base" />
+  `;
+}
+
+function renderWallHitZones3d(roomWidth, roomLength, projection, hitMargin = 14, highlightWall = null) {
+  const m = hitMargin / projection.scale;
+  const h = ROOM_WALL_HEIGHT_CM;
+  const zones = [
+    {
+      wall: 'top',
+      points: [worldPoint(0, 0, -m), worldPoint(roomWidth, 0, -m), worldPoint(roomWidth, h, 0), worldPoint(0, h, 0)],
+    },
+    {
+      wall: 'right',
+      points: [
+        worldPoint(roomWidth + m, 0, 0),
+        worldPoint(roomWidth + m, 0, roomLength),
+        worldPoint(roomWidth, h, roomLength),
+        worldPoint(roomWidth, h, 0),
+      ],
+    },
+    {
+      wall: 'bottom',
+      points: [
+        worldPoint(roomWidth, 0, roomLength + m),
+        worldPoint(0, 0, roomLength + m),
+        worldPoint(0, h, roomLength),
+        worldPoint(roomWidth, h, roomLength),
+      ],
+    },
+    {
+      wall: 'left',
+      points: [worldPoint(-m, 0, roomLength), worldPoint(-m, 0, 0), worldPoint(0, h, 0), worldPoint(0, h, roomLength)],
+    },
+  ];
+
+  return zones
+    .map((zone) => {
+      const activeCls = zone.wall === highlightWall ? ' door-wall-hit--active' : '';
+      return `
+    <polygon
+      class="door-wall-hit${activeCls}"
+      data-wall="${zone.wall}"
+      points="${projectWorldPolygon(projection, zone.points)}"
+      fill="transparent"
+    />
+  `;
+    })
+    .join('\n');
+}
+
+function projectedDoorArcPoints(projection, hinge, free, leaf, steps = 12) {
+  const start = Math.atan2(free.y - hinge.y, free.x - hinge.x);
+  let end = Math.atan2(leaf.y - hinge.y, leaf.x - hinge.x);
+  const cross = (free.x - hinge.x) * (leaf.y - hinge.y) - (free.y - hinge.y) * (leaf.x - hinge.x);
+
+  if (cross > 0 && end < start) end += Math.PI * 2;
+  if (cross <= 0 && end > start) end -= Math.PI * 2;
+
+  const radius = Math.hypot(free.x - hinge.x, free.y - hinge.y);
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const t = index / steps;
+    const angle = start + (end - start) * t;
+    return projection.project(floorPointToWorld(hinge.x + Math.cos(angle) * radius, hinge.y + Math.sin(angle) * radius));
+  });
+}
+
+function renderDoorSvg3d(door, roomWidth, roomLength, projection, { selected = false } = {}) {
+  const geom = doorGeometry(door, roomWidth, roomLength);
+  const h = ROOM_WALL_HEIGHT_CM;
+  const hinge = projection.project(floorPointToWorld(geom.hinge.x, geom.hinge.y));
+  const free = projection.project(floorPointToWorld(geom.free.x, geom.free.y));
+  const leaf = projection.project(floorPointToWorld(geom.leaf.x, geom.leaf.y));
+  const opening = `M ${hinge.x} ${hinge.y} L ${free.x} ${free.y}`;
+  const leafPath = `M ${hinge.x} ${hinge.y} L ${leaf.x} ${leaf.y}`;
+  const arc = pathFromProjectedPoints(projectedDoorArcPoints(projection, geom.hinge, geom.free, geom.leaf));
+  const selectedCls = selected ? ' door-symbol--selected' : '';
+  const handleR = 6;
+  const hitPad = 8;
+  const minX = Math.min(hinge.x, free.x, leaf.x) - hitPad;
+  const minY = Math.min(hinge.y, free.y, leaf.y) - hitPad;
+  const maxX = Math.max(hinge.x, free.x, leaf.x) + hitPad;
+  const maxY = Math.max(hinge.y, free.y, leaf.y) + hitPad;
+  const wallOpening = [
+    worldPoint(geom.hinge.x, 0, geom.hinge.y),
+    worldPoint(geom.free.x, 0, geom.free.y),
+    worldPoint(geom.free.x, h, geom.free.y),
+    worldPoint(geom.hinge.x, h, geom.hinge.y),
+  ];
+
+  let handle = '';
+  if (selected) {
+    handle = `
+      <circle
+        class="door-resize-handle"
+        data-door-id="${door.id}"
+        data-action="resize"
+        cx="${free.x}"
+        cy="${free.y}"
+        r="${handleR}"
+      />
+    `;
+  }
+
+  return `
+    <g class="door-symbol${selectedCls}" data-door-id="${door.id}">
+      <polygon points="${projectWorldPolygon(projection, wallOpening)}" class="door-wall-opening" pointer-events="none" />
+      <rect
+        class="door-hit"
+        data-door-id="${door.id}"
+        data-action="move"
+        x="${minX}"
+        y="${minY}"
+        width="${maxX - minX}"
+        height="${maxY - minY}"
+        fill="transparent"
+      />
+      <path d="${opening}" class="door-opening" pointer-events="none" />
+      <path d="${leafPath}" class="door-leaf" pointer-events="none" />
+      <path d="${arc}" class="door-arc" fill="none" pointer-events="none" />
+      ${handle}
+    </g>
+  `;
 }
 
 function renderSvg(layout) {
@@ -682,52 +1023,61 @@ function renderSvg(layout) {
   const wrapRect = canvasWrap.getBoundingClientRect();
   const availW = Math.max(wrapRect.width - 2, 200);
   const availH = Math.max(wrapRect.height - 2, 200);
-  const margin = PADDING + outwardDoorSwingMargin();
-
-  const scale = Math.max(
-    MIN_ZOOM,
-    Math.min((availW - margin * 2) / roomWidth, (availH - margin * 2) / roomLength)
-  );
-
-  const svgW = roomWidth * scale + margin * 2;
-  const svgH = roomLength * scale + margin * 2;
+  const projection = createRoomProjection(roomWidth, roomLength, availW, availH);
+  const { scale, svgW, svgH } = projection;
 
   svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
   svg.setAttribute('width', svgW);
   svg.setAttribute('height', svgH);
 
-  const tx = (x) => margin + x * scale;
-  const ty = (y) => margin + y * scale;
   const hasTexture = Boolean(tileImage);
   const parts = [buildPatternDef(layout, scale)];
 
+  parts.push(renderRoomShell(roomWidth, roomLength, projection));
+
   parts.push(`
-    <rect
-      x="${tx(0)}" y="${ty(0)}"
-      width="${roomWidth * scale}" height="${roomLength * scale}"
+    <polygon
+      points="${projectFloorPolygon(projection, [
+        { x: 0, y: 0 },
+        { x: roomWidth, y: 0 },
+        { x: roomWidth, y: roomLength },
+        { x: 0, y: roomLength },
+      ])}"
       class="room-outline"
-      rx="2"
     />
   `);
 
+  const widthLabel = projection.project(worldPoint(roomWidth / 2, ROOM_WALL_HEIGHT_CM + 18, 0));
+  const lengthLabel = projection.project(worldPoint(-32, 0, roomLength / 2));
   parts.push(`
-    <text x="${tx(roomWidth / 2)}" y="${margin / 2 + 4}" class="dim-label" text-anchor="middle">
+    <text x="${widthLabel.x}" y="${widthLabel.y}" class="dim-label" text-anchor="middle">
       ${formatCm(roomWidth)} cm
     </text>
     <text
-      x="${margin / 2 - 4}" y="${ty(roomLength / 2)}"
+      x="${lengthLabel.x}" y="${lengthLabel.y}"
       class="dim-label" text-anchor="middle"
-      transform="rotate(-90, ${margin / 2 - 4}, ${ty(roomLength / 2)})"
     >
       ${formatCm(roomLength)} cm
     </text>
   `);
 
   for (const panel of panels) {
-    const px = tx(panel.x);
-    const py = ty(panel.y);
-    const pw = panel.width * scale;
-    const ph = panel.height * scale;
+    const panelPoints = [
+      { x: panel.x, y: panel.y },
+      { x: panel.x + panel.width, y: panel.y },
+      { x: panel.x + panel.width, y: panel.y + panel.height },
+      { x: panel.x, y: panel.y + panel.height },
+    ];
+    const projectedPanel = panelPoints.map((point) => projection.project(floorPointToWorld(point.x, point.y)));
+    const labelPoint = projection.project(floorPointToWorld(panel.x + panel.width / 2, panel.y + panel.height / 2));
+    const projectedWidth = Math.hypot(
+      projectedPanel[1].x - projectedPanel[0].x,
+      projectedPanel[1].y - projectedPanel[0].y
+    );
+    const projectedHeight = Math.hypot(
+      projectedPanel[3].x - projectedPanel[0].x,
+      projectedPanel[3].y - projectedPanel[0].y
+    );
     const textureCls = hasTexture ? ' panel--textured' : '';
     const cls = panel.isFull
       ? `panel panel--full${textureCls}`
@@ -735,24 +1085,21 @@ function renderSvg(layout) {
     const fillAttr = hasTexture ? ' fill="url(#tile-pattern)"' : '';
 
     parts.push(`
-      <rect x="${px}" y="${py}" width="${pw}" height="${ph}" class="${cls}"${fillAttr} rx="1" />
+      <polygon points="${pointsAttr(projectedPanel)}" class="${cls}"${fillAttr} />
     `);
 
     if (hasTexture && !panel.isFull) {
       parts.push(`
-        <rect
-          x="${px}" y="${py}" width="${pw}" height="${ph}"
-          class="panel-cut-overlay" rx="1"
-        />
+        <polygon points="${pointsAttr(projectedPanel)}" class="panel-cut-overlay" />
       `);
     }
 
-    if (pw > 28 && ph > 18) {
+    if (projectedWidth > 28 && projectedHeight > 18) {
       const label = panel.isFull
         ? 'Full'
         : `${formatCm(panel.width)}×${formatCm(panel.height)}`;
       parts.push(`
-        <text x="${px + pw / 2}" y="${py + ph / 2 + 4}" class="panel-label" text-anchor="middle">
+        <text x="${labelPoint.x}" y="${labelPoint.y + 4}" class="panel-label" text-anchor="middle">
           ${label}
         </text>
       `);
@@ -760,17 +1107,17 @@ function renderSvg(layout) {
   }
 
   const highlightWall = dragState?.mode === 'move' ? dragState.snapWall : null;
-  parts.push(renderWallHitZones(roomWidth, roomLength, tx, ty, scale, 14, highlightWall));
+  parts.push(renderWallHitZones3d(roomWidth, roomLength, projection, 14, highlightWall));
 
   for (const door of doors) {
     parts.push(
-      renderDoorSvg(door, roomWidth, roomLength, tx, ty, scale, {
+      renderDoorSvg3d(door, roomWidth, roomLength, projection, {
         selected: door.id === selectedDoorId,
       })
     );
   }
 
-  lastRenderContext = { roomWidth, roomLength, scale, tx, ty, svgW, svgH };
+  lastRenderContext = { roomWidth, roomLength, scale, projection, svgW, svgH };
 
   svg.innerHTML = parts.join('\n');
 }
@@ -912,6 +1259,37 @@ function buildExportSvgStyles() {
       stroke: ${value('--text')};
       stroke-width: 2;
     }
+    .room-floor-shadow {
+      fill: rgb(28 25 23 / 0.1);
+    }
+    .room-wall {
+      stroke: #d6d3d1;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+    .room-wall--back {
+      fill: #f5f3f0;
+    }
+    .room-wall--left {
+      fill: #ebe7e1;
+    }
+    .room-wall--right {
+      fill: #e3ddd4;
+    }
+    .room-wall--front {
+      fill: rgb(255 253 250 / 0.38);
+    }
+    .room-wall-lines,
+    .room-corner-lines {
+      fill: none;
+      stroke: rgb(120 113 108 / 0.48);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+    .room-floor-base {
+      fill: #fffdfa;
+      stroke: none;
+    }
     .panel {
       stroke-width: 1.5;
     }
@@ -957,6 +1335,12 @@ function buildExportSvgStyles() {
     .door-opening {
       stroke-width: 2.5;
     }
+    .door-wall-opening {
+      fill: rgb(255 255 255 / 0.55);
+      stroke: #7c3aed;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
     .door-wall-hit,
     .door-hit,
     .door-resize-handle {
@@ -973,7 +1357,7 @@ function serializeSvgForExport() {
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   clone.setAttribute('width', width);
   clone.setAttribute('height', height);
-  clone.classList.remove('layout-svg--dragging');
+  clone.classList.remove('layout-svg--dragging', 'layout-svg--rotating');
   clone.querySelectorAll('.door-symbol--selected').forEach((doorEl) => {
     doorEl.classList.remove('door-symbol--selected');
   });
@@ -1343,15 +1727,43 @@ doorsListEl.addEventListener('click', (event) => {
 
 function finishDrag() {
   if (!dragState) return;
-  const { doorId } = dragState;
+  const { doorId, mode, didRotate } = dragState;
   dragState = null;
   svg.classList.remove('layout-svg--dragging');
+  svg.classList.remove('layout-svg--rotating');
+  if (mode === 'rotate-view') {
+    suppressNextSvgClick = Boolean(didRotate);
+    return;
+  }
   syncDoorFormFields(doorId);
   schedulePersist();
 }
 
 function handlePointerMove(event) {
   if (!dragState || !lastRenderContext) return;
+
+  if (dragState.mode === 'rotate-view') {
+    const dx = event.clientX - dragState.startClientX;
+    const dy = event.clientY - dragState.startClientY;
+    const moved = Math.hypot(dx, dy);
+    if (moved >= ROOM_ROTATION_CLICK_THRESHOLD) {
+      dragState.didRotate = true;
+      roomRotation = {
+        x: clamp(
+          dragState.startRotation.x - dy * ROOM_ROTATION_SENSITIVITY,
+          ROOM_ROTATION_MIN_X,
+          ROOM_ROTATION_MAX_X
+        ),
+        y: clamp(
+          dragState.startRotation.y + dx * ROOM_ROTATION_SENSITIVITY,
+          ROOM_ROTATION_MIN_Y,
+          ROOM_ROTATION_MAX_Y
+        ),
+      };
+      renderPreview();
+    }
+    return;
+  }
 
   const door = doors.find((d) => d.id === dragState.doorId);
   if (!door) return;
@@ -1419,6 +1831,15 @@ svg.addEventListener('pointerdown', (event) => {
 
   selectedDoorId = null;
   renderPreview();
+  dragState = {
+    mode: 'rotate-view',
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startRotation: { ...roomRotation },
+    didRotate: false,
+  };
+  svg.classList.add('layout-svg--rotating');
+  svg.setPointerCapture(event.pointerId);
 });
 
 svg.addEventListener('pointermove', handlePointerMove);
@@ -1434,21 +1855,26 @@ svg.addEventListener('pointercancel', finishDrag);
 
 svg.addEventListener('click', (event) => {
   if (!lastRenderContext || dragState) return;
+  if (suppressNextSvgClick) {
+    suppressNextSvgClick = false;
+    event.preventDefault();
+    return;
+  }
   if (event.target.closest('[data-door-id]')) return;
 
+  const hitZone = event.target.closest('.door-wall-hit');
+  if (hitZone) {
+    const pick = pickWallFromHitZone(event, hitZone);
+    if (pick) addDoor({ wall: pick.wall, position: pick.position });
+    return;
+  }
+
   const pt = svgPointFromEvent(event);
-  const { roomWidth, roomLength, tx, ty, scale } = lastRenderContext;
-  const pick = pickWallFromPoint(
-    pt.x,
-    pt.y,
-    roomWidth,
-    roomLength,
-    tx,
-    ty,
-    scale,
-    16,
-    DEFAULT_DOOR_WIDTH
-  );
+  const { roomWidth, roomLength, scale } = lastRenderContext;
+  const room = roomPointFromSvg(pt.x, pt.y);
+  const pick = pickWallFromRoomPoint(room.x, room.y, roomWidth, roomLength, DEFAULT_DOOR_WIDTH, {
+    maxDistance: 16 / scale,
+  });
   if (pick) {
     addDoor({ wall: pick.wall, position: pick.position });
   }
